@@ -499,6 +499,7 @@ input[type="date"].fi::-webkit-calendar-picker-indicator,input[type="time"].fi::
     </div>
     <div id="grp-plan" class="grp">
       <div id="pg-goals" class="pg on"></div>
+      <div id="pg-fam" class="pg"></div>
       <div id="pg-notif" class="pg"></div>
     </div>
     <div id="grp-settings" class="grp">
@@ -637,6 +638,14 @@ input[type="date"].fi::-webkit-calendar-picker-indicator,input[type="time"].fi::
           <span id="i-freeze-val" style="font-size:13px;font-weight:700;color:var(--g);min-width:48px;text-align:right">3枚/月</span>
         </div>
         <div style="font-size:11px;color:var(--tm);margin-top:3px">できなかった日でも連続記録を維持できる回数です。重要な習慣ほど少なめがおすすめです。</div>
+      </div>
+      <div class="fg">
+        <label class="fl">👨‍👩‍👧 家族共有</label>
+        <label style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;background:var(--s1);border:1px solid var(--b);cursor:pointer">
+          <input type="checkbox" id="i-share" style="width:17px;height:17px;accent-color:var(--g)">
+          <span style="font-size:12px;color:var(--t)">この習慣の達成状況と時間を家族に共有する</span>
+        </label>
+        <div style="font-size:11px;color:var(--tm);margin-top:3px">オンにした習慣だけが家族タブで見えるようになります（家族共有の設定が済んでいる場合）。</div>
       </div>
     </div>
 
@@ -1079,6 +1088,7 @@ const save=()=>{
         caches.open('habit-data').then(c=>c.put('/reminder-snapshot',new Response(JSON.stringify(snap),{headers:{'Content-Type':'application/json'}})));
       }
     }catch(e){}
+    try{famMarkDirty();}catch(e){}
   }catch(e){
     saveFailed=true;
     // 容量超過（QuotaExceededError）時はユーザーに明示的に警告
@@ -2074,6 +2084,7 @@ const RENDERERS={
   stats:()=>safeRun(rStats,'統計'),
   all:()=>safeRun(rAll,'すべて'),
   week:()=>safeRun(rWeek,'週次'),
+  fam:()=>safeRun(rFam,'家族'),
 };
 
 // グループ定義
@@ -2108,6 +2119,7 @@ const GROUPS={
     label:'計画',
     tabs:[
       {id:'goals', label:'🎯 目標'},
+      {id:'fam',   label:'👨‍👩‍👧 家族'},
       {id:'notif', label:'🔔 通知'},
     ]
   },
@@ -2697,6 +2709,7 @@ function openHabModal(id){
   selE=h?h.emoji:'📚';
   selDows=h?[...(h.dows||ALLD)]:[...ALLD];
   selTrackMode=h?(h.trackMode||'time'):'time';
+  document.getElementById('i-share').checked=!!(h&&h.share);
   // トラッキング方式ボタンの初期化
   document.querySelectorAll('.track-mode-btn').forEach(btn=>{
     const active=btn.dataset.mode===selTrackMode;
@@ -2823,8 +2836,9 @@ document.getElementById('hab-save').addEventListener('click',()=>{
 
   const freezeLimit=Math.max(0,Math.min(10,parseInt(document.getElementById('i-freeze').value)||0));
   const cat=document.getElementById('i-cat').value,catO=getCat(cat),dows=[...selDows].sort();
-  if(editHID){const h=ST.habits.find(x=>x.id===editHID);if(h){h.name=name;h.cat=cat;h.color=catO.color;h.emoji=selE;h.goalMin=selTrackMode==='time'?goal:0;h.dows=dows;h.trackMode=selTrackMode;h.freezeLimit=freezeLimit;h.isSample=false;if(pendIP!==null)h.iconPhoto=pendIP;}}
-  else{const nh={id:ST.nextId++,name,emoji:selE,iconPhoto:pendIP,cat,dows,goalMin:selTrackMode==='time'?goal:0,trackMode:selTrackMode,freezeLimit,color:catO.color,checks:{},times:{},createdAt:toS()};ST.habits.push(nh);TF.ena.push(nh.id);}
+  const shareFlag=document.getElementById('i-share').checked;
+  if(editHID){const h=ST.habits.find(x=>x.id===editHID);if(h){h.name=name;h.cat=cat;h.color=catO.color;h.emoji=selE;h.goalMin=selTrackMode==='time'?goal:0;h.dows=dows;h.trackMode=selTrackMode;h.freezeLimit=freezeLimit;h.share=shareFlag;h.isSample=false;if(pendIP!==null)h.iconPhoto=pendIP;}}
+  else{const nh={id:ST.nextId++,name,emoji:selE,iconPhoto:pendIP,cat,dows,goalMin:selTrackMode==='time'?goal:0,trackMode:selTrackMode,freezeLimit,share:shareFlag,color:catO.color,checks:{},times:{},createdAt:toS()};ST.habits.push(nh);TF.ena.push(nh.id);}
   save();closeOv('hab');rToday();updateBadge();
 });
 document.getElementById('hab-dup').addEventListener('click',()=>{
@@ -2973,6 +2987,255 @@ document.getElementById('tm-save').addEventListener('click',()=>{
   if(total>0){h.times[date]=total;if(!h.checks[date])h.checks[date]=1;}else delete h.times[date];
   save();closeOv('tm');rToday();
 });
+
+/* ══════════════════════════════════════
+   家族共有（GitHub Gistをデータ置き場にした進捗の見せ合い）
+   ・設定(トークン等)は端末のみに保存し、JSONエクスポートには含めない
+   ・共有フラグ(h.share)がオンの習慣だけを送信する
+══════════════════════════════════════ */
+const FAM_KEY='ht_fam', FAM_CACHE='ht_fam_cache';
+function famCfg(){try{return JSON.parse(localStorage.getItem(FAM_KEY))||null;}catch(e){return null;}}
+function famSaveCfg(c){try{if(c)localStorage.setItem(FAM_KEY,JSON.stringify(c));else{localStorage.removeItem(FAM_KEY);localStorage.removeItem(FAM_CACHE);}}catch(e){}}
+function famConfigured(){const c=famCfg();return !!(c&&c.token&&c.gist&&c.name&&c.mid);}
+function famNewMid(){return 'm'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+const FAM_API='https://api.github.com';
+function famHeaders(token){return {'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json'};}
+
+// 共有サマリーを構築（共有フラグがオンの習慣のみ）
+function famBuildSummary(){
+  const c=famCfg();if(!c)return null;
+  const shared=ST.habits.filter(h=>h.share);
+  const td=toS();
+  let weekMin=0;
+  shared.forEach(h=>{for(let i=0;i<7;i++)weekMin+=(h.times||{})[dB(i)]||0;});
+  return {
+    v:1, mid:c.mid, name:c.name, updated:Date.now(), dayKey:td,
+    habits:shared.map(h=>({
+      name:h.name, emoji:h.emoji, mode:h.trackMode||'time',
+      checked:!!h.checks[td],
+      todayMin:(h.times||{})[td]||0,
+      goalMin:h.goalMin||0,
+      streak:streak(h)
+    })),
+    todayDone:shared.filter(h=>h.checks[td]).length,
+    todayTotal:shared.length,
+    todayMin:shared.reduce((s,h)=>s+((h.times||{})[td]||0),0),
+    weekMin
+  };
+}
+
+let famPushTimer=null;
+function famMarkDirty(){
+  if(!famConfigured())return;
+  clearTimeout(famPushTimer);
+  famPushTimer=setTimeout(()=>{famPush().catch(()=>{});},8000); // 連続操作をまとめて8秒後に送信
+}
+async function famPush(){
+  const c=famCfg();if(!c)return;
+  const sum=famBuildSummary();if(!sum)return;
+  const files={};files['member_'+c.mid+'.json']={content:JSON.stringify(sum)};
+  const res=await fetch(FAM_API+'/gists/'+c.gist,{method:'PATCH',headers:famHeaders(c.token),body:JSON.stringify({files})});
+  if(!res.ok)throw new Error('push '+res.status);
+}
+async function famPull(){
+  const c=famCfg();if(!c)return null;
+  const res=await fetch(FAM_API+'/gists/'+c.gist,{headers:famHeaders(c.token)});
+  if(!res.ok)throw new Error('pull '+res.status);
+  const g=await res.json();
+  const members=[];
+  Object.keys(g.files||{}).forEach(fn=>{
+    if(!/^member_.*\.json$/.test(fn))return;
+    try{const d=JSON.parse(g.files[fn].content);if(d&&d.name)members.push(d);}catch(e){}
+  });
+  members.sort((a,b)=>(a.mid===c.mid?-1:b.mid===c.mid?1:(b.updated||0)-(a.updated||0)));
+  try{localStorage.setItem(FAM_CACHE,JSON.stringify({at:Date.now(),members}));}catch(e){}
+  return members;
+}
+async function famCreateGist(token){
+  const res=await fetch(FAM_API+'/gists',{method:'POST',headers:famHeaders(token),body:JSON.stringify({
+    description:'習慣トラッカー 家族共有データ',public:false,
+    files:{'README.txt':{content:'習慣トラッカーの家族共有用データです。member_*.json に各メンバーのサマリーが保存されます。'}}
+  })});
+  if(!res.ok)throw new Error('create '+res.status);
+  return (await res.json()).id;
+}
+function famAgo(ts){
+  if(!ts)return'—';
+  const m=Math.floor((Date.now()-ts)/60000);
+  if(m<1)return'たった今';if(m<60)return m+'分前';
+  const h=Math.floor(m/60);if(h<24)return h+'時間前';
+  return Math.floor(h/24)+'日前';
+}
+function famErrMsg(e){
+  const s=String(e&&e.message||'');
+  if(s.includes('401'))return'トークンが無効です。設定を確認してください。';
+  if(s.includes('404'))return'共有IDが見つかりません。IDを確認してください。';
+  if(s.includes('403'))return'アクセスが拒否されました（権限またはAPI制限）。';
+  return'通信に失敗しました。電波状況をご確認ください。';
+}
+
+function rFam(){
+  const root=document.getElementById('pg-fam');root.innerHTML='';
+  if(!famConfigured()){rFamSetup(root);return;}
+  const c=famCfg();
+
+  // ヘッダー行
+  const top=document.createElement('div');top.className='card';
+  const tr=document.createElement('div');tr.style.cssText='display:flex;align-items:center;gap:8px';
+  const ti=document.createElement('div');ti.style.cssText='flex:1;min-width:0';
+  const t1=document.createElement('div');t1.style.cssText='font-size:13px;font-weight:700';t1.textContent='👨‍👩‍👧 家族の進捗';
+  const t2=document.createElement('div');t2.id='fam-sync-status';t2.style.cssText='font-size:11px;color:var(--tm);margin-top:2px';t2.textContent='同期中…';
+  ti.appendChild(t1);ti.appendChild(t2);tr.appendChild(ti);
+  const rb=document.createElement('button');rb.className='btn sm';rb.textContent='🔄 更新';rb.addEventListener('click',()=>rFam());tr.appendChild(rb);
+  const sb=document.createElement('button');sb.className='btn sm';sb.textContent='⚙';sb.title='共有設定';sb.addEventListener('click',()=>rFamSetup(root,true));tr.appendChild(sb);
+  top.appendChild(tr);
+  const sharedN=ST.habits.filter(h=>h.share).length;
+  const hint=document.createElement('div');hint.style.cssText='font-size:11px;color:var(--tm);margin-top:7px';
+  hint.textContent='あなた（'+c.name+'）の共有中の習慣: '+sharedN+'件'+(sharedN===0?' — 各習慣の編集画面の「詳細設定 → 家族共有」で選べます':'');
+  top.appendChild(hint);
+  root.appendChild(top);
+
+  const list=document.createElement('div');list.id='fam-list';root.appendChild(list);
+
+  // キャッシュがあれば即表示してから最新化
+  try{
+    const cache=JSON.parse(localStorage.getItem(FAM_CACHE));
+    if(cache&&cache.members)renderFamMembers(list,cache.members,c);
+  }catch(e){}
+
+  (async()=>{
+    try{
+      await famPush(); // 自分の最新を先に反映
+      const members=await famPull();
+      const st=document.getElementById('fam-sync-status');
+      if(st)st.textContent='最終同期: たった今';
+      if(members)renderFamMembers(list,members,c);
+    }catch(e){
+      const st=document.getElementById('fam-sync-status');
+      if(st)st.textContent='⚠️ '+famErrMsg(e);
+    }
+  })();
+}
+function renderFamMembers(list,members,c){
+  list.innerHTML='';
+  if(!members.length){
+    const em=document.createElement('div');em.className='card';em.style.cssText='text-align:center;color:var(--tm);font-size:12px;padding:20px';
+    em.textContent='まだメンバーのデータがありません。家族に共有ID・トークンを伝えて参加してもらいましょう。';
+    list.appendChild(em);return;
+  }
+  members.forEach(m=>{
+    const isMe=m.mid===c.mid;
+    const card=document.createElement('div');card.className='card';
+    const hd=document.createElement('div');hd.style.cssText='display:flex;align-items:baseline;gap:7px;margin-bottom:6px';
+    const nm=document.createElement('span');nm.style.cssText='font-size:14px;font-weight:800';nm.textContent=(isMe?'🙋 ':'')+m.name+(isMe?'（あなた）':'');
+    const up=document.createElement('span');up.style.cssText='font-size:10px;color:var(--tm);margin-left:auto';up.textContent=famAgo(m.updated);
+    hd.appendChild(nm);hd.appendChild(up);card.appendChild(hd);
+
+    const today=m.dayKey===toS();
+    const sm=document.createElement('div');sm.style.cssText='font-size:12px;color:var(--t2);margin-bottom:8px';
+    if(!today){
+      sm.textContent='今日の記録はまだありません（最終記録日: '+(m.dayKey||'—')+'）';
+    }else{
+      sm.textContent='今日 '+m.todayDone+'/'+m.todayTotal+' 達成'+(m.todayMin>0?' ・ 合計 '+fmtM(m.todayMin):'')+(m.weekMin>0?' ・ 今週 '+fmtS(m.weekMin):'');
+    }
+    card.appendChild(sm);
+
+    (m.habits||[]).forEach(h=>{
+      const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:7px;padding:5px 0;border-top:1px solid var(--b);font-size:12px';
+      const ic=document.createElement('span');ic.textContent=h.emoji||'📌';row.appendChild(ic);
+      const nm2=document.createElement('span');nm2.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';nm2.textContent=h.name;row.appendChild(nm2);
+      if(h.streak>=3){const stk=document.createElement('span');stk.style.cssText='font-size:10px;color:#b45309';stk.textContent='🔥'+h.streak;row.appendChild(stk);}
+      if(today&&h.todayMin>0){const tm=document.createElement('span');tm.style.cssText='font-size:11px;color:var(--t2)';tm.textContent=fmtM(h.todayMin);row.appendChild(tm);}
+      const ck=document.createElement('span');ck.style.cssText='font-size:13px';
+      ck.textContent=today?(h.checked?'✅':'⬜'):'—';
+      row.appendChild(ck);
+      card.appendChild(row);
+    });
+    list.appendChild(card);
+  });
+  const note=document.createElement('div');note.style.cssText='font-size:10px;color:var(--tm);text-align:center;margin-top:4px;line-height:1.7';
+  note.textContent='更新はアプリを開いたときと記録の約8秒後に自動同期されます。「🔄 更新」で手動同期もできます。';
+  list.appendChild(note);
+}
+
+// 設定画面（初期設定/変更共用）
+function rFamSetup(root,isEdit){
+  root.innerHTML='';
+  const c=famCfg()||{};
+  const card=document.createElement('div');card.className='card';
+  const h=document.createElement('div');h.style.cssText='font-size:14px;font-weight:800;margin-bottom:6px';h.textContent='👨‍👩‍👧 家族共有の設定';card.appendChild(h);
+  const p=document.createElement('div');p.style.cssText='font-size:12px;color:var(--t2);line-height:1.8;margin-bottom:12px;white-space:pre-line';
+  p.textContent='家族それぞれの達成状況・学習時間を見せ合う機能です。GitHubの非公開Gistをデータ置き場として使います。\n'+
+    '【最初の1人】下の3項目を入力して「新しく共有グループを作成」→ 表示された共有IDとトークンを家族に伝える\n'+
+    '【参加する人】家族から聞いた共有IDとトークンを入力して「保存して参加」';
+  card.appendChild(p);
+
+  const mkInput=(label,id,val,ph,type)=>{
+    const fg=document.createElement('div');fg.className='fg';
+    const fl=document.createElement('label');fl.className='fl';fl.textContent=label;fg.appendChild(fl);
+    const inp=document.createElement('input');inp.type=type||'text';inp.id=id;inp.className='fi';inp.value=val||'';inp.placeholder=ph||'';
+    inp.autocomplete='off';fg.appendChild(inp);card.appendChild(fg);
+    return inp;
+  };
+  mkInput('あなたの表示名（家族に見える名前）','fam-name',c.name,'例: お父さん');
+  mkInput('GitHubトークン','fam-token',c.token,'ghp_... または github_pat_...','password');
+  const tokHint=document.createElement('div');tokHint.style.cssText='font-size:11px;color:var(--tm);margin:-6px 0 10px;line-height:1.7';
+  tokHint.textContent='GitHubにログイン → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token で、「gist」だけにチェックを入れて作成します。家族全員で同じトークンを使ってOKです。';
+  card.appendChild(tokHint);
+  mkInput('共有ID（Gist ID）','fam-gist',c.gist,'最初の1人は空欄のまま下の「作成」を押す');
+
+  const msg=document.createElement('div');msg.style.cssText='font-size:12px;margin-bottom:10px;min-height:16px;color:var(--t2)';card.appendChild(msg);
+
+  const row1=document.createElement('div');row1.style.cssText='display:flex;flex-direction:column;gap:8px';
+  const bCreate=document.createElement('button');bCreate.className='btn p';bCreate.textContent='✨ 新しく共有グループを作成（最初の1人）';
+  const bJoin=document.createElement('button');bJoin.className='btn p';bJoin.textContent='✅ 保存して参加';
+  row1.appendChild(bCreate);row1.appendChild(bJoin);
+  if(isEdit||famConfigured()){
+    const bOff=document.createElement('button');bOff.className='btn d sm';bOff.textContent='🔌 この端末の共有を解除（トークンを削除）';
+    bOff.addEventListener('click',()=>confirmDel('この端末から家族共有の設定を削除しますか？\n（共有済みのデータと他の家族には影響しません）',()=>{famSaveCfg(null);rFam();}));
+    row1.appendChild(bOff);
+    const bBack=document.createElement('button');bBack.className='btn sm';bBack.textContent='← 戻る';
+    bBack.addEventListener('click',()=>rFam());row1.appendChild(bBack);
+  }
+  card.appendChild(row1);
+
+  const sec=document.createElement('div');sec.style.cssText='font-size:10px;color:var(--tm);margin-top:12px;line-height:1.8';
+  sec.textContent='🔒 トークンと共有IDはこの端末の中だけに保存され、データのJSONエクスポートには含まれません。トークンを知っている人はこの共有グループのデータを読み書きできるため、家族以外には教えないでください。共有されるのは「共有オン」にした習慣のサマリーのみで、メモや演習記録などは送信されません。';
+  card.appendChild(sec);
+  root.appendChild(card);
+
+  const getVals=()=>({
+    name:document.getElementById('fam-name').value.trim(),
+    token:document.getElementById('fam-token').value.trim(),
+    gist:document.getElementById('fam-gist').value.trim()
+  });
+  bCreate.addEventListener('click',async()=>{
+    const v=getVals();
+    if(!v.name||!v.token){msg.textContent='⚠️ 表示名とトークンを入力してください。';return;}
+    msg.textContent='作成中…';bCreate.disabled=true;
+    try{
+      const gid=await famCreateGist(v.token);
+      famSaveCfg({name:v.name,token:v.token,gist:gid,mid:famNewMid()});
+      await famPush().catch(()=>{});
+      showBnr('✅','共有グループを作成しました','共有ID: '+gid+'\nこのIDとトークンを家族に伝えてください（家族タブの⚙からいつでも確認できます）。');
+      rFam();
+    }catch(e){msg.textContent='⚠️ '+famErrMsg(e);bCreate.disabled=false;}
+  });
+  bJoin.addEventListener('click',async()=>{
+    const v=getVals();
+    if(!v.name||!v.token||!v.gist){msg.textContent='⚠️ 3項目すべてを入力してください。';return;}
+    msg.textContent='接続確認中…';bJoin.disabled=true;
+    try{
+      const res=await fetch(FAM_API+'/gists/'+v.gist,{headers:famHeaders(v.token)});
+      if(!res.ok)throw new Error('pull '+res.status);
+      const cur=famCfg();
+      famSaveCfg({name:v.name,token:v.token,gist:v.gist,mid:(cur&&cur.mid)||famNewMid()});
+      await famPush().catch(()=>{});
+      showBnr('✅','家族共有に参加しました','');
+      rFam();
+    }catch(e){msg.textContent='⚠️ '+famErrMsg(e);bJoin.disabled=false;}
+  });
+}
 
 /* ══════════════════════════════════════
    カウントダウンボード（試験日など重要日の常時表示）
