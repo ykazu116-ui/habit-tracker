@@ -363,6 +363,38 @@ body{overscroll-behavior-y:contain}
   input,textarea,[contenteditable]{-webkit-user-select:text;user-select:text}
 }
 .dsec p{white-space:pre-line}
+#conf-msg{white-space:pre-line}
+/* ストップウォッチ */
+#watch-bar{position:fixed;left:10px;right:10px;bottom:calc(66px + env(safe-area-inset-bottom,0px));z-index:900;background:#166534;color:#fff;border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer}
+#watch-bar #watch-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;font-size:15px}
+#watch-bar .watch-stop{background:rgba(255,255,255,.18);padding:4px 10px;border-radius:8px;font-size:11px;flex-shrink:0}
+.wbtn{width:30px;height:30px;border-radius:8px;border:1px solid var(--gl);background:var(--gbg);color:var(--g);cursor:pointer;font-size:12px;flex-shrink:0}
+.wbtn.on{background:#166534;color:#fff;border-color:#166534}
+.pacebox{margin-top:7px;padding:8px 10px;border-radius:8px;background:var(--s1);border:1px solid var(--b);font-size:11px;line-height:1.7;color:var(--t2)}
+/* カウントダウンボード */
+.cdrow{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:12px;-webkit-overflow-scrolling:touch}
+.cdrow::-webkit-scrollbar{display:none}
+.cdcard{flex-shrink:0;min-width:108px;padding:9px 12px;border-radius:11px;background:var(--s2);border:1px solid var(--b);cursor:pointer;text-align:center}
+.cdcard .cdt{font-size:11px;font-weight:600;color:var(--t2);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+.cdcard .cdn{font-size:17px;font-weight:800;line-height:1.2}
+.cdcard .cdd{font-size:9px;color:var(--tm);margin-top:2px}
+.cdadd{flex-shrink:0;width:40px;border-radius:11px;background:var(--s1);border:1.5px dashed var(--b);color:var(--tm);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+/* 年間ヒートマップ */
+.hm-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+.hm-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,10px);gap:2px;width:max-content}
+.hm-cell{width:10px;height:10px;border-radius:2px;background:var(--s1);border:1px solid var(--b)}
+.hm-cell.l1{background:#bbf7d0;border-color:#bbf7d0}
+.hm-cell.l2{background:#4ade80;border-color:#4ade80}
+.hm-cell.l3{background:#16a34a;border-color:#16a34a}
+.hm-cell.l4{background:#166534;border-color:#166534}
+.hm-cell.fut{opacity:.35}
+.hm-cell.sel{outline:2px solid var(--t);outline-offset:1px}
+.hm-months{display:flex;width:max-content;font-size:9px;color:var(--tm);margin-bottom:3px}
+.hm-legend{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--tm);margin-top:7px;justify-content:flex-end}
+/* input[type=date]はappearance:noneにするとAndroid/Chromeでカレンダーピッカーが
+   正しく開かなくなる／表示が崩れる場合があるため、日付・時刻系だけネイティブ外観に戻す */
+input[type="date"].fi,input[type="time"].fi{-webkit-appearance:auto;appearance:auto;padding:8px 8px;color-scheme:light dark;cursor:pointer}
+input[type="date"].fi::-webkit-calendar-picker-indicator,input[type="time"].fi::-webkit-calendar-picker-indicator{cursor:pointer;padding:6px;margin-left:4px;opacity:.8}
 .a2hs-steps{margin-top:8px;padding:10px 12px;border-radius:9px;background:var(--s1);border:1px solid var(--b);font-size:12px;line-height:1.9;color:var(--t2)}
 .a2hs-steps b{color:var(--t)}
 </style>
@@ -663,6 +695,18 @@ body{overscroll-behavior-y:contain}
     <div class="mrow"><button class="btn" id="tm-cancel">キャンセル</button><button class="btn p" id="tm-save" style="flex:1">記録する</button></div>
   </div>
 </div>
+<!-- カウントダウン -->
+<div class="ov" id="ov-cd">
+  <div class="modal">
+    <div class="mh"></div>
+    <h2 id="cd-h">カウントダウンを追加</h2>
+    <div class="fg"><label class="fl">タイトル（例: 共通テスト）</label><input type="text" id="cd-title" class="fi" placeholder="共通テスト" maxlength="30"></div>
+    <div class="fg"><label class="fl">日付</label><input type="date" id="cd-date" class="fi"></div>
+    <div class="fg"><label class="fl">絵文字（任意）</label><input type="text" id="cd-emoji" class="fi" placeholder="🎯" maxlength="4"></div>
+    <div id="cd-delrow" style="display:none;margin-bottom:10px"><button class="btn d sm" id="cd-del" style="width:100%">🗑 このカウントダウンを削除</button></div>
+    <div class="mrow"><button class="btn" id="cd-cancel">キャンセル</button><button class="btn p" id="cd-save" style="flex:1">保存する</button></div>
+  </div>
+</div>
 <!-- 読書 -->
 <div class="ov" id="ov-book">
   <div class="modal">
@@ -824,10 +868,24 @@ const DCATS=[
   {id:'mind',label:'マインド',color:'#0891b2'},
   {id:'oth',label:'その他',color:'#888780'}
 ];
-const NOW=new Date(); NOW.setHours(0,0,0,0);
+// 日付の区切り時刻（例: 2なら深夜2時までは前日扱い）。ページ読み込みの初期段階で必要なため、
+// プロファイル本体のロードより前に端末単位の設定として読み込む。
+let CUTOFF_H=(()=>{try{const v=parseInt(localStorage.getItem('ht_cutoff'));return(v>=0&&v<=6)?v:0;}catch(e){return 0;}})();
+function logicalDayStart(realDate,cutoffH){
+  const d=new Date(realDate);
+  if(d.getHours()<cutoffH)d.setDate(d.getDate()-1);
+  d.setHours(0,0,0,0);
+  return d;
+}
+const NOW=logicalDayStart(new Date(),CUTOFF_H);
 const TODOW=NOW.getDay();
-const toS=()=>NOW.toISOString().slice(0,10);
-const dS=d=>new Date(d).toISOString().slice(0,10);
+// 【v24修正】従来は toISOString(UTC変換) を使っていたため、日本時間では
+// 内部の日付キーが常に1日前にズレていた。ローカル日付で直接整形する方式に修正。
+const dS=d=>{const x=new Date(d);const p=n=>String(n).padStart(2,'0');return x.getFullYear()+'-'+p(x.getMonth()+1)+'-'+p(x.getDate());};
+const toS=()=>dS(NOW);
+// "YYYY-MM-DD" 文字列をローカル日付として解釈（new Date(str)はUTC解釈になるため使わない）
+const parseYMD=s=>{if(!s)return null;const m=String(s).split('-').map(Number);return new Date(m[0],m[1]-1,m[2]||1);};
+const shiftYMD=(s,n)=>{const d=parseYMD(s);if(!d||isNaN(d))return s;d.setDate(d.getDate()+n);return dS(d);};
 const dB=n=>{const d=new Date(NOW);d.setDate(d.getDate()-n);return dS(d);};
 const fmtM=m=>{if(!m)return'0分';const h=Math.floor(m/60),mn=m%60;return h?(mn?h+'時間'+mn+'分':h+'時間'):mn+'分';};
 const fmtS=m=>{if(!m)return'—';const h=Math.floor(m/60),mn=m%60;return h?(mn?h+'h'+mn+'m':h+'h'):m+'m';};
@@ -911,6 +969,29 @@ let PROFILES=loadProfileList();
 let activeProfileId=(()=>{try{return localStorage.getItem(ACTIVE_PROFILE_KEY)||'default';}catch(e){return 'default';}})();
 if(!PROFILES.some(p=>p.id===activeProfileId))activeProfileId='default';
 
+// 【v24修正】旧バージョン(UTC変換)で記録されたデータは、UTCより東のタイムゾーン
+// (日本など)では日付キーが1日前にズレて保存されていた。1回だけ+1日補正する。
+// ・チェック/学習時間/フリーズ/作成日/演習/メモ/読了日など既定値(当日)で記録されたものが対象
+// ・目標の期限(goals[].date)や集計フィルタ期間は必ず手動選択(実日付)のため補正しない
+function migrateDateShift(st){
+  if(st.dateFixV24)return false;
+  st.dateFixV24=true;
+  if(new Date().getTimezoneOffset()>=0)return true; // UTC以西はズレていないので印だけ付ける
+  const shiftKeys=obj=>{if(!obj)return obj;const out={};Object.keys(obj).forEach(k=>{let nk=k;if(/^\d{4}-\d{2}-\d{2}$/.test(k))nk=shiftYMD(k,1);else{const m=k.match(/^(wk_memo_)(\d{4}-\d{2}-\d{2})$/);if(m)nk=m[1]+shiftYMD(m[2],1);}out[nk]=obj[k];});return out;};
+  (st.habits||[]).forEach(h=>{
+    h.checks=shiftKeys(h.checks);h.times=shiftKeys(h.times);
+    h.freezeDates=shiftKeys(h.freezeDates);h.freezeUsed=shiftKeys(h.freezeUsed);
+    if(h.createdAt)h.createdAt=shiftYMD(h.createdAt,1);
+  });
+  (st.exercises||[]).forEach(x=>{if(x.date)x.date=shiftYMD(x.date,1);});
+  (st.memos||[]).forEach(m=>{if(m.date)m.date=shiftYMD(m.date,1);});
+  (st.books||[]).forEach(b=>{if(b.date)b.date=shiftYMD(b.date,1);});
+  if(st.nSent)st.nSent=shiftKeys(st.nSent);
+  if(st.weekMemos)st.weekMemos=shiftKeys(st.weekMemos);
+  if(st.lastBackup)st.lastBackup=shiftYMD(st.lastBackup,1);
+  return true;
+}
+
 // 指定プロファイルのデータをlocalStorageから読み込み、正規化したST/TFを返す
 // （初期ロード時・プロファイル切り替え時の両方で共通利用）
 function loadProfileData(pid){
@@ -927,10 +1008,17 @@ function loadProfileData(pid){
       if(typeof st.pomoNotif==='undefined')st.pomoNotif='sound';
       if(typeof st.lastBackup==='undefined')st.lastBackup=null;
       if(!st.weekMemos)st.weekMemos={};
+      if(typeof st.watch==='undefined')st.watch=null;
+      if(!st.countdowns)st.countdowns=[];
+      if(!st.nextCdId)st.nextCdId=(st.countdowns.reduce((m,c)=>Math.max(m,c.id||0),0)+1);
       st.habits.forEach(h=>{if(!h.createdAt)h.createdAt=dB(90);if(!h.freezeDates)h.freezeDates={};if(!h.freezeUsed)h.freezeUsed={};});
       st.goals.forEach(g=>{if(!g.habitIds)g.habitIds=g.habitId?[g.habitId]:[];});
+      // 旧バージョンの日付ズレを1回だけ補正し、補正済みフラグごと即保存（再実行による二重補正を防ぐ）
+      if(migrateDateShift(st)){try{localStorage.setItem(stKey(pid),JSON.stringify(st));}catch(e){}}
     }
   }catch(e){}
+  // 保存データが無い新規プロファイルは新形式で始まるため補正済み扱いにする
+  if(!('dateFixV24' in st))st.dateFixV24=true;
   if(!st.cats||!st.cats.length)st.cats=[...DCATS];
   // バッジ系の初期化（旧形式 "日付文字列" を新形式 {count,firstDate,lastDate} に自動マイグレーション）
   if(!st.unlockedBadges)st.unlockedBadges={};
@@ -984,6 +1072,13 @@ const save=()=>{
     localStorage.setItem(stKey(activeProfileId),JSON.stringify(ST));
     localStorage.setItem(tfKey(activeProfileId),JSON.stringify(TF));
     saveFailed=false;
+    // バックグラウンド通知用: 未完了状況とリマインダー設定のスナップショットをSWと共有
+    try{
+      if(location.protocol==='https:'&&'caches' in window){
+        const snap={v:1,cutoff:CUTOFF_H,dayKey:toS(),habits:ST.habits.map(h=>({id:h.id,name:h.name,dows:h.dows||ALLD,checked:!!h.checks[toS()],rem:(ST.rem&&ST.rem.habits?ST.rem.habits[h.id]:null)||null}))};
+        caches.open('habit-data').then(c=>c.put('/reminder-snapshot',new Response(JSON.stringify(snap),{headers:{'Content-Type':'application/json'}})));
+      }
+    }catch(e){}
   }catch(e){
     saveFailed=true;
     // 容量超過（QuotaExceededError）時はユーザーに明示的に警告
@@ -1167,7 +1262,8 @@ const streak=h=>{
   return s;
 };
 const rate30=h=>{let done=0,tot=0;for(let i=0;i<30;i++){const d2=new Date(NOW);d2.setDate(d2.getDate()-i);if((h.dows||ALLD).includes(d2.getDay())){tot++;if(h.checks[dB(i)])done++;}}return tot?Math.round(done/tot*100):0;};
-const mInR=(h,sd,ed)=>{let t=0;for(let d=new Date(sd);d<=new Date(ed);d.setDate(d.getDate()+1))t+=(h.times||{})[dS(d)]||0;return t;};
+const asD=v=>typeof v==='string'?parseYMD(v):new Date(v);
+const mInR=(h,sd,ed)=>{let t=0;const e=asD(ed);for(let d=asD(sd);d<=e;d.setDate(d.getDate()+1))t+=(h.times||{})[dS(d)]||0;return t;};
 const totM=(h,days)=>{let t=0;for(let i=0;i<days;i++)t+=(h.times||{})[dB(i)]||0;return t;};
 
 // ── 目標進捗計算（トラッキング方式に対応）──
@@ -1206,6 +1302,31 @@ function calcGoalProgress(g,habits){
   const pp=hasTarget?Math.round(perHabit.reduce((s,p)=>s+p.pct,0)/perHabit.length):0;
   const accLabel=timeHabs.length?Math.round(timeAccHours*10)/10+'h / '+(g.hours||0)+'h':'';
   return {pp,accLabel,hasTarget,perHabit,timeAccHours,hasCheckHabs:checkHabs.length>0,hasTimeHabs:timeHabs.length>0};
+}
+
+// 目標の逆算ペース: 必要ペースと直近7日の実績を比較
+function calcGoalPace(g,prog,dL){
+  if(dL===null||dL<=0)return null;
+  const out={};
+  if(prog.hasTimeHabs&&(g.hours||0)>0){
+    const remain=Math.max(0,g.hours-(prog.timeAccHours||0));
+    const need=remain/dL; // 必要ペース(h/日)
+    const habs=ST.habits.filter(h=>(g.habitIds||[]).includes(h.id)&&(h.trackMode||'time')!=='check');
+    let m7=0;for(let i=0;i<7;i++){const k=dB(i);habs.forEach(h=>{m7+=(h.times||{})[k]||0;});}
+    const avg=m7/7/60; // 直近7日平均(h/日)
+    const daysAtPace=avg>0?Math.ceil(remain/avg):null; // 今のペースで達成に必要な日数
+    out.time={remain,need,avg,daysAtPace};
+  }
+  if(prog.hasCheckHabs&&(g.checkGoal||0)>0){
+    const habs=ST.habits.filter(h=>(g.habitIds||[]).includes(h.id)&&(h.trackMode||'time')==='check');
+    let remainC=0,c7=0;
+    habs.forEach(h=>{
+      remainC+=Math.max(0,(g.checkGoal||0)-Object.keys(h.checks||{}).length);
+      for(let i=0;i<7;i++)if(h.checks[dB(i)])c7++;
+    });
+    out.check={remain:remainC,needPerWeek:remainC/dL*7,last7:c7};
+  }
+  return (out.time||out.check)?out:null;
 }
 
 // フリーズ券の残数（習慣ごとに設定された月間上限まで、毎月リセット・未使用分は繰越なし）
@@ -1820,7 +1941,17 @@ let swReg=null;
 function setupServiceWorker(){
   if(!('serviceWorker' in navigator))return;
   if(location.protocol!=='https:'&&location.hostname!=='localhost')return; // ローカルファイルでは登録不可
-  navigator.serviceWorker.register('./sw.js').then(reg=>{swReg=reg;}).catch(()=>{});
+  navigator.serviceWorker.register('./sw.js').then(async reg=>{
+    swReg=reg;
+    // インストール済みPWAではバックグラウンド定期チェックを登録（対応ブラウザのみ）
+    try{
+      if('periodicSync' in reg){
+        let ok=true;
+        try{const p=await navigator.permissions.query({name:'periodic-background-sync'});ok=(p.state==='granted');}catch(e){}
+        if(ok)await reg.periodicSync.register('habit-reminders',{minInterval:60*60*1000});
+      }
+    }catch(e){}
+  }).catch(()=>{});
 }
 setupServiceWorker();
 
@@ -1890,10 +2021,10 @@ function getA2HSGuide(){
 // 日付またぎ対応：ホーム画面から常駐起動しても「今日」がズレないよう、
 // 復帰時に日付が変わっていたら自動リロードして最新状態にする
 (function watchDayChange(){
-  const bootDay=new Date();bootDay.setHours(0,0,0,0);
+  const bootDay=NOW.getTime();
   const check=()=>{
-    const d=new Date();d.setHours(0,0,0,0);
-    if(d.getTime()!==bootDay.getTime()){
+    const d=logicalDayStart(new Date(),CUTOFF_H);
+    if(d.getTime()!==bootDay){
       try{save();}catch(e){}
       location.reload();
     }
@@ -1903,6 +2034,15 @@ function getA2HSGuide(){
   window.addEventListener('pageshow',e=>{if(e.persisted)check();});
   setInterval(check,60000);
 })();
+
+// 日付・時刻inputは、appearance:none回避後もタップ位置によっては
+// ピッカーが開きにくい端末があるため、フィールド全体タップでも確実に開くようにする
+document.addEventListener('click',e=>{
+  const t=e.target;
+  if(t&&t.tagName==='INPUT'&&(t.type==='date'||t.type==='time')&&typeof t.showPicker==='function'){
+    try{t.showPicker();}catch(err){}
+  }
+});
 
 /* ══════════════════════════════════════
    タブ切り替え
@@ -2103,6 +2243,7 @@ function openMenu(hid,anchorEl){
   menu.className='mmenu';
   const items=[
     ['📅 日付を指定して記録',()=>openTmModal(hid)],
+    ['▶ ストップウォッチで計測',()=>startWatch(hid)],
     ['⏱ タイマーに紐づける',()=>{ST.pomoHab=hid;save();switchGroup('record');}],
     ['📝 演習ログを追加',()=>openExModal(null,hid)]
   ];
@@ -2153,6 +2294,9 @@ function rToday(){
     {icon:'🎯',label:'目標確認',   action:()=>switchGroup('plan')},
     {icon:'🏆',label:'バッジ',     action:()=>openBadgesModal()},
   ];
+  // ── カウントダウンボード（最上部・登録がある場合のみ） ──
+  const cdRow=mkCountdownRow();
+  if(cdRow)root.appendChild(cdRow);
   const scg=document.createElement('div');scg.className='sc-grid';
   shortcuts.forEach(s=>{
     const btn=document.createElement('button');btn.className='sc-btn';
@@ -2165,7 +2309,7 @@ function rToday(){
   root.appendChild(scg);
 
   // ── バックアップ緊急警告（14日以上未バックアップ時のみ今日タブにも表示）──
-  const daysSinceBk=ST.lastBackup?Math.floor((NOW-new Date(ST.lastBackup))/86400000):null;
+  const daysSinceBk=ST.lastBackup?Math.floor((NOW-parseYMD(ST.lastBackup))/86400000):null;
   if(daysSinceBk===null||daysSinceBk>=14){
     const bkBnr=document.createElement('div');
     bkBnr.className='backup-bnr danger';
@@ -2431,7 +2575,12 @@ function rToday(){
       }
       hi.addEventListener('change',updateTime);
       mi.addEventListener('change',updateTime);
-      [lbl,hi,u1,mi,u2,disp].forEach(x=>trow.appendChild(x));
+      const running=!!(ST.watch&&ST.watch.habitId===h.id);
+      const swb=document.createElement('button');swb.className='wbtn'+(running?' on':'');
+      swb.textContent=running?'⏹':'▶';
+      swb.title=running?'計測を停止して記録':'ストップウォッチで計測開始';
+      swb.addEventListener('click',()=>{running?stopWatch():startWatch(h.id);});
+      [lbl,hi,u1,mi,u2,disp,swb].forEach(x=>trow.appendChild(x));
       card.appendChild(trow);
 
       // 目標バー
@@ -2473,7 +2622,7 @@ function rToday(){
         const prog=calcGoalProgress(g,ST.habits);
         if(!prog.hasTarget)return;
         const pp=prog.pp;
-        const dL=g.date?Math.ceil((new Date(g.date)-NOW)/86400000):null;
+        const dL=g.date?Math.round((parseYMD(g.date)-NOW)/86400000):null;
         const need=dL&&dL>0&&prog.hasTimeHabs?Math.max(0,((g.hours||0)-(prog.timeAccHours||0))/dL):null;
         // 状態判定
         let label='';
@@ -2824,6 +2973,146 @@ document.getElementById('tm-save').addEventListener('click',()=>{
   if(total>0){h.times[date]=total;if(!h.checks[date])h.checks[date]=1;}else delete h.times[date];
   save();closeOv('tm');rToday();
 });
+
+/* ══════════════════════════════════════
+   カウントダウンボード（試験日など重要日の常時表示）
+══════════════════════════════════════ */
+let editCdId=null;
+function openCdModal(id){
+  editCdId=id||null;
+  const c=id?ST.countdowns.find(x=>x.id===id):null;
+  document.getElementById('cd-h').textContent=c?'カウントダウンを編集':'カウントダウンを追加';
+  document.getElementById('cd-title').value=c?c.title:'';
+  document.getElementById('cd-date').value=c?c.date:'';
+  document.getElementById('cd-emoji').value=c?(c.emoji||''):'';
+  document.getElementById('cd-delrow').style.display=c?'block':'none';
+  openOv('cd');
+}
+document.getElementById('cd-cancel').addEventListener('click',()=>closeOv('cd'));
+document.getElementById('cd-save').addEventListener('click',()=>{
+  const title=document.getElementById('cd-title').value.trim();
+  const date=document.getElementById('cd-date').value;
+  if(!title||!date){showBnr('⚠️','入力が不足しています','タイトルと日付の両方を入力してください。');return;}
+  const emoji=document.getElementById('cd-emoji').value.trim()||'🎯';
+  if(editCdId){const c=ST.countdowns.find(x=>x.id===editCdId);if(c)Object.assign(c,{title,date,emoji});}
+  else ST.countdowns.push({id:ST.nextCdId++,title,date,emoji});
+  save();closeOv('cd');rToday();
+});
+document.getElementById('cd-del').addEventListener('click',()=>{
+  const c=ST.countdowns.find(x=>x.id===editCdId);
+  if(!c){closeOv('cd');return;}
+  confirmDel('「'+c.title+'」のカウントダウンを削除しますか？',()=>{
+    ST.countdowns=ST.countdowns.filter(x=>x.id!==editCdId);
+    save();closeOv('cd');rToday();
+  });
+});
+// 今日タブ最上部に表示するカウントダウン行を生成
+function mkCountdownRow(){
+  const items=(ST.countdowns||[])
+    .map(c=>({...c,dL:Math.round((parseYMD(c.date)-NOW)/86400000)}))
+    .filter(c=>c.dL>=-1) // 前日までの「終了」表示を最後に、それ以降は非表示（データは残る）
+    .sort((a,b)=>a.dL-b.dL);
+  if(!items.length&&!(ST.countdowns||[]).length){
+    // 未登録時: 細い追加ボタンだけを表示（登録するとカード表示に変わる）
+    const pill=document.createElement('button');
+    pill.style.cssText='width:100%;padding:8px;margin-bottom:12px;border-radius:10px;border:1.5px dashed var(--b);background:var(--s1);color:var(--tm);font-size:12px;cursor:pointer;font-family:inherit';
+    pill.textContent='📅 ＋ 試験日などのカウントダウンを追加';
+    pill.addEventListener('click',()=>openCdModal());
+    return pill;
+  }
+  const row=document.createElement('div');row.className='cdrow';
+  items.forEach(c=>{
+    const card=document.createElement('div');card.className='cdcard';
+    const col=c.dL<0?'var(--tm)':c.dL===0?'#dc2626':c.dL<=7?'#dc2626':c.dL<=30?'#b45309':'var(--g)';
+    const t=document.createElement('div');t.className='cdt';t.textContent=c.emoji+' '+c.title;
+    const n=document.createElement('div');n.className='cdn';n.style.color=col;
+    n.textContent=c.dL<0?'終了':c.dL===0?'今日！':'あと'+c.dL+'日';
+    const d=document.createElement('div');d.className='cdd';
+    d.textContent=parseYMD(c.date).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric',weekday:'short'});
+    card.appendChild(t);card.appendChild(n);card.appendChild(d);
+    card.addEventListener('click',()=>openCdModal(c.id));
+    row.appendChild(card);
+  });
+  const add=document.createElement('button');add.className='cdadd';add.textContent='＋';
+  add.title='カウントダウンを追加';add.setAttribute('aria-label','カウントダウンを追加');
+  add.addEventListener('click',()=>openCdModal());
+  row.appendChild(add);
+  return row;
+}
+
+/* ══════════════════════════════════════
+   ストップウォッチ（開始/停止で学習時間を自動記録）
+══════════════════════════════════════ */
+let watchTick=null;
+function watchElapsedStr(){
+  if(!ST.watch)return'';
+  const s=Math.max(0,Math.floor((Date.now()-ST.watch.startAt)/1000));
+  const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60;
+  return (h?h+':':'')+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+}
+function startWatch(hid){
+  const h=ST.habits.find(x=>x.id===hid);if(!h)return;
+  if((h.trackMode||'time')==='check'){showBnr('ℹ️','この習慣はチェック型です','時間計測はできないため、チェックボタンで記録してください。');return;}
+  if(ST.watch&&ST.watch.habitId===hid)return;
+  if(ST.watch)stopWatch(true); // 別の習慣を計測中なら先に記録して停止
+  ST.watch={habitId:hid,startAt:Date.now()};save();
+  showBnr('▶','計測開始','「'+h.name+'」を計測中。停止すると自動で学習時間に記録されます。');
+  renderWatchBar();try{rToday();}catch(e){}
+}
+function stopWatch(silent){
+  const w=ST.watch;if(!w)return;
+  const h=ST.habits.find(x=>x.id===w.habitId);
+  const secs=Math.max(0,Math.round((Date.now()-w.startAt)/1000));
+  ST.watch=null;
+  if(h&&secs>=30){
+    const mins=Math.max(1,Math.round(secs/60));
+    // 深夜の勉強も「開始した時点」の論理日付に記録（区切り時刻設定と連動）
+    const key=dS(logicalDayStart(new Date(w.startAt),CUTOFF_H));
+    if(!h.times)h.times={};
+    h.times[key]=Math.min(1440,(h.times[key]||0)+mins);
+    if(!h.checks[key])h.checks[key]=1;
+    save();
+    if(!silent){
+      const dayLabel=key===toS()?'今日':key;
+      showUndoToast('「'+h.name+'」に'+fmtM(mins)+'を記録しました（'+dayLabel+'分）',()=>{
+        const cur=(h.times||{})[key]||0;
+        const back=cur-mins;
+        if(back>0)h.times[key]=back;else delete h.times[key];
+        save();try{rToday();}catch(e){}
+      });
+    }
+  }else{
+    save();
+    if(!silent&&h)showBnr('⏱','計測を破棄しました','30秒未満のため記録していません。');
+  }
+  renderWatchBar();try{rToday();}catch(e){}
+  setTimeout(checkBadges,200);
+}
+function renderWatchBar(){
+  let bar=document.getElementById('watch-bar');
+  if(!ST.watch){
+    if(bar)bar.remove();
+    if(watchTick){clearInterval(watchTick);watchTick=null;}
+    return;
+  }
+  const h=ST.habits.find(x=>x.id===ST.watch.habitId);
+  if(!h){ST.watch=null;save();renderWatchBar();return;}
+  if(!bar){
+    bar=document.createElement('div');bar.id='watch-bar';
+    bar.addEventListener('click',()=>stopWatch());
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML='';
+  const t1=document.createElement('span');t1.textContent='⏱ '+h.emoji+' '+h.name;
+  const t2=document.createElement('span');t2.id='watch-elapsed';t2.textContent=watchElapsedStr();
+  const btn=document.createElement('span');btn.className='watch-stop';btn.textContent='⏹ 停止して記録';
+  bar.appendChild(t1);bar.appendChild(t2);bar.appendChild(btn);
+  if(!watchTick)watchTick=setInterval(()=>{
+    const el=document.getElementById('watch-elapsed');
+    if(el)el.textContent=watchElapsedStr();
+  },1000);
+}
+renderWatchBar(); // 起動時: 計測中のままリロードされても継続表示
 
 /* ══════════════════════════════════════
    ポモドーロ
@@ -3183,7 +3472,7 @@ function rEx(){
     const top=document.createElement('div');top.style='display:flex;align-items:center;gap:5px;margin-bottom:3px';
     if(h){const ct=document.createElement('span');ct.className='ctag';ct.style.cssText='background:'+lt(cat.color)+';color:'+cat.color;ct.textContent=h.emoji+' '+h.name;top.appendChild(ct);}
     const dt=document.createElement('span');dt.style.cssText='font-size:11px;color:var(--tm);margin-left:auto';
-    dt.textContent=ex.date?new Date(ex.date).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'}):'—';top.appendChild(dt);info.appendChild(top);
+    dt.textContent=ex.date?parseYMD(ex.date).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'}):'—';top.appendChild(dt);info.appendChild(top);
     if(ex.material){const m=document.createElement('div');m.style.cssText='font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';m.textContent=ex.material;info.appendChild(m);}
     if(ex.range){const rg=document.createElement('div');rg.style.cssText='font-size:12px;color:var(--t2)';rg.textContent=ex.range;info.appendChild(rg);}
     if(ex.total){const sc=document.createElement('div');sc.style.cssText='font-size:11px;color:var(--tm)';sc.textContent=ex.correct+'/'+ex.total+'問正解';info.appendChild(sc);}
@@ -3325,7 +3614,7 @@ function rMon(){
   root.appendChild(mkMnav(y+'年'+(m+1)+'月',()=>{rptM=new Date(rptM.getFullYear(),rptM.getMonth()-1,1);rMon();},()=>{rptM=new Date(rptM.getFullYear(),rptM.getMonth()+1,1);rMon();}));
   const sg=document.createElement('div');sg.className='sg g3';sg.style.marginBottom='12px';
   [['月の学習時間',fmtS(tMin),true],['チェックイン',tCk+'回',false],['習慣数',ST.habits.length,false]].forEach(([l,v,g])=>sg.appendChild(mkSC(l,v,g)));root.appendChild(sg);
-  const doneD=[],totD=[];for(let d=1;d<=dim;d++){const ds=dS(new Date(y,m,d));doneD.push(ST.habits.filter(h=>h.checks[ds]).length);totD.push(ST.habits.filter(h=>(h.dows||ALLD).includes(new Date(ds).getDay())).length);}
+  const doneD=[],totD=[];for(let d=1;d<=dim;d++){const dt=new Date(y,m,d),ds=dS(dt);doneD.push(ST.habits.filter(h=>h.checks[ds]).length);totD.push(ST.habits.filter(h=>(h.dows||ALLD).includes(dt.getDay())).length);}
   const cc=document.createElement('div');cc.className='card';const ct=document.createElement('div');ct.style.cssText='font-size:13px;font-weight:700;margin-bottom:9px;color:var(--t)';ct.textContent='日別達成率';cc.appendChild(ct);
   const cv=document.createElement('div');cv.style.cssText='position:relative;width:100%;height:150px';const cn=document.createElement('canvas');cn.id='ch2';cv.appendChild(cn);cc.appendChild(cv);root.appendChild(cc);
   const sc=document.createElement('div');sc.className='card';const st=document.createElement('div');st.style.cssText='font-size:13px;font-weight:700;margin-bottom:7px;color:var(--t)';st.textContent='科目別';sc.appendChild(st);
@@ -3337,6 +3626,83 @@ function rMon(){
   if(ch2){ch2.destroy();ch2=null;}
   try{const rates=doneD.map((d,i)=>totD[i]>0?Math.round(d/totD[i]*100):0);ch2=new Chart(cn,{type:'bar',data:{labels:Array.from({length:dim},(_,i)=>i+1+'日'),datasets:[{data:rates,backgroundColor:'#4ade80',borderRadius:2,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:v=>v.raw+'%'}}},scales:{x:{ticks:{color:'#9b9b98',font:{size:9},autoSkip:true,maxRotation:0},grid:{display:false}},y:{max:100,ticks:{color:'#9b9b98',font:{size:10},callback:v=>v+'%'},grid:{color:'#e0e0d8'},beginAtZero:true}}}});}catch(e){}
 }
+function mkYearHeatmap(year){
+  const card=document.createElement('div');card.className='card';
+  const ct=document.createElement('div');ct.style.cssText='font-size:13px;font-weight:700;margin-bottom:9px;color:var(--t)';ct.textContent='🌱 '+year+'年の記録ヒートマップ';card.appendChild(ct);
+
+  // 日ごとのスコア: 学習時間(分) を主軸に、チェックのみの日も最低レベル1で着色
+  const dayLevel=(ds,d)=>{
+    let min=0,ck=0;
+    ST.habits.forEach(h=>{min+=(h.times||{})[ds]||0;if(h.checks[ds])ck++;});
+    if(min>=120)return 4;
+    if(min>=60)return 3;
+    if(min>=30)return 2;
+    if(min>0||ck>0)return 1;
+    return 0;
+  };
+
+  const scroll=document.createElement('div');scroll.className='hm-scroll';
+  const inner=document.createElement('div');inner.style.width='max-content';
+  // 月ラベル行（各月の1日が属する週の位置に配置）
+  const mrow=document.createElement('div');mrow.className='hm-months';
+  const grid=document.createElement('div');grid.className='hm-grid';
+
+  const first=new Date(year,0,1),last=new Date(year,11,31);
+  const lead=first.getDay(); // 1/1の曜日ぶん空セル
+  for(let i=0;i<lead;i++){const sp=document.createElement('div');sp.style.cssText='width:10px;height:10px';grid.appendChild(sp);}
+
+  const info=document.createElement('div');
+  info.style.cssText='font-size:11px;color:var(--t2);margin-top:8px;min-height:16px';
+  info.textContent='マスをタップすると詳細が表示されます';
+  let selCell=null;
+
+  const CW=12; // セル10px+gap2px
+  let weekIdx=0, lastMonth=-1;
+  const monthPos=[];
+  for(let d=new Date(first);d<=last;d.setDate(d.getDate()+1)){
+    const ds=dS(d);
+    const dow=d.getDay();
+    if(d.getMonth()!==lastMonth){lastMonth=d.getMonth();monthPos.push({m:lastMonth,week:weekIdx});}
+    const cell=document.createElement('div');
+    const isFut=d>NOW;
+    const lv=isFut?0:dayLevel(ds,d);
+    cell.className='hm-cell'+(lv?' l'+lv:'')+(isFut?' fut':'');
+    const dObj=new Date(d);
+    if(!isFut){
+      cell.addEventListener('click',()=>{
+        if(selCell)selCell.classList.remove('sel');
+        selCell=cell;cell.classList.add('sel');
+        let min=0;const done=[];
+        ST.habits.forEach(h=>{min+=(h.times||{})[ds]||0;if(h.checks[ds])done.push(h.emoji);});
+        info.textContent=dObj.toLocaleDateString('ja-JP',{month:'long',day:'numeric',weekday:'short'})+' — '
+          +(min>0?fmtM(min):'学習記録なし')+(done.length?' ／ 達成 '+done.join(''):min>0?'':' ／ チェックなし');
+      });
+    }
+    grid.appendChild(cell);
+    if(dow===6)weekIdx++;
+  }
+  monthPos.forEach((mp,i)=>{
+    const lb=document.createElement('span');
+    const nextW=i<monthPos.length-1?monthPos[i+1].week:weekIdx+1;
+    lb.style.cssText='display:inline-block;width:'+((nextW-mp.week)*CW)+'px';
+    lb.textContent=(mp.m+1)+'月';
+    mrow.appendChild(lb);
+  });
+  inner.appendChild(mrow);inner.appendChild(grid);scroll.appendChild(inner);card.appendChild(scroll);
+
+  // 凡例
+  const lg=document.createElement('div');lg.className='hm-legend';
+  const l1=document.createElement('span');l1.textContent='少';lg.appendChild(l1);
+  [0,1,2,3,4].forEach(l=>{const c=document.createElement('div');c.className='hm-cell'+(l?' l'+l:'');lg.appendChild(c);});
+  const l2=document.createElement('span');l2.textContent='多（0/〜30分/〜1h/〜2h/2h超）';lg.appendChild(l2);
+  card.appendChild(lg);
+  card.appendChild(info);
+
+  // 今年を表示している場合は現在週まで自動スクロール
+  if(year===NOW.getFullYear())setTimeout(()=>{try{scroll.scrollLeft=scroll.scrollWidth;}catch(e){}},0);
+  return card;
+}
+
 function rYear(){
   const root=document.getElementById('pg-year');root.innerHTML='';
   const months=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
@@ -3346,6 +3712,9 @@ function rYear(){
   root.appendChild(mkMnav(rptY+'年',()=>{rptY--;rYear();},()=>{rptY++;rYear();}));
   const sg=document.createElement('div');sg.className='sg g3';sg.style.marginBottom='12px';
   [['年間学習時間',fmtS(yTot),true],['最高月',yTot>0?(bestIdx+1)+'月':'—',false],['月平均',fmtS(Math.round(yTot/12)),false]].forEach(([l,v,g])=>sg.appendChild(mkSC(l,v,g)));root.appendChild(sg);
+
+  // ── 年間ヒートマップ（GitHubの草スタイル） ──
+  root.appendChild(mkYearHeatmap(rptY));
   const cc=document.createElement('div');cc.className='card';const ct=document.createElement('div');ct.style.cssText='font-size:13px;font-weight:700;margin-bottom:9px;color:var(--t)';ct.textContent='月別学習時間';cc.appendChild(ct);
   const cv=document.createElement('div');cv.style.cssText='position:relative;width:100%;height:150px';const cn=document.createElement('canvas');cn.id='ch3';cv.appendChild(cn);cc.appendChild(cv);root.appendChild(cc);
   const dc=document.createElement('div');dc.className='card';const dt=document.createElement('div');dt.style.cssText='font-size:13px;font-weight:700;margin-bottom:7px;color:var(--t)';dt.textContent='月別詳細';dc.appendChild(dt);
@@ -3418,7 +3787,7 @@ function rBooks(){
   const root=document.getElementById('pg-books');root.innerHTML='';
   const readBooks=ST.books.filter(b=>(b.status||'read')==='read');
   const wishBooks=ST.books.filter(b=>b.status==='wishlist');
-  const mB=readBooks.filter(b=>{if(!b.date)return false;const d=new Date(b.date);return d.getMonth()===NOW.getMonth()&&d.getFullYear()===NOW.getFullYear();});
+  const mB=readBooks.filter(b=>{if(!b.date)return false;const d=parseYMD(b.date);return d.getMonth()===NOW.getMonth()&&d.getFullYear()===NOW.getFullYear();});
   const sg=document.createElement('div');sg.className='sg g3';sg.style.marginBottom='12px';
   [['読了冊数',readBooks.length+'冊',true],['今月',mB.length+'冊',false],['読みたい本',wishBooks.length+'冊',false]].forEach(([l,v,g])=>sg.appendChild(mkSC(l,v,g)));root.appendChild(sg);
 
@@ -3540,7 +3909,7 @@ function rGoals(){
     const hIds=g.habitIds||[];const lHabs=ST.habits.filter(h=>hIds.includes(h.id));
     const prog=calcGoalProgress(g,ST.habits);
     const tH=g.hours||0;
-    const dL=g.date?Math.ceil((new Date(g.date)-NOW)/86400000):null;
+    const dL=g.date?Math.round((parseYMD(g.date)-NOW)/86400000):null;
     const need=dL&&dL>0&&tH>0&&prog.hasTimeHabs?Math.max(0,(tH-(prog.timeAccHours||0))/dL):null;
     const card=document.createElement('div');card.className='gcrd';card.draggable=true;
     card.style.cursor='grab';
@@ -3574,8 +3943,28 @@ function rGoals(){
       const pb=document.createElement('div');pb.className='gpbar';const pf=document.createElement('div');pf.className='gpf';pf.style.width=pp+'%';pb.appendChild(pf);card.appendChild(pb);
       const iw=document.createElement('div');iw.style.cssText='display:flex;gap:9px;margin-top:6px;flex-wrap:wrap';
       if(dL!==null){const dl=document.createElement('span');dl.style.cssText='font-size:12px;color:'+(dL<=7?'#dc2626':dL<=30?'#b45309':'var(--t2)');dl.textContent='📅 残り'+dL+'日';iw.appendChild(dl);}
-      if(need!==null){const nd=document.createElement('span');nd.style.cssText='font-size:12px;color:var(--t2)';nd.textContent='📈 1日'+Math.round(need*10)/10+'h必要';iw.appendChild(nd);}
       card.appendChild(iw);
+      // ── 逆算ペースメーカー ──
+      const pace=pp<100?calcGoalPace(g,prog,dL):null;
+      if(pace){
+        const r1=v=>Math.round(v*10)/10;
+        const box=document.createElement('div');box.className='pacebox';
+        const lines=[];
+        if(pace.time){
+          const t=pace.time;
+          lines.push('📈 必要ペース <b>1日'+r1(t.need)+'h</b>（残り'+r1(t.remain)+'h ÷ '+dL+'日）');
+          lines.push('⏱ 直近7日の実績 1日'+r1(t.avg)+'h');
+          if(t.avg<=0)lines.push('⏸ 直近7日は記録がありません。今日から1日'+r1(t.need)+'hで達成できます');
+          else if(t.daysAtPace!==null&&t.daysAtPace<=dL)lines.push('✅ このペースなら期限の約<b>'+(dL-t.daysAtPace)+'日前</b>に達成見込みです');
+          else lines.push('⚠️ 1日あたり<b>あと'+r1(t.need-t.avg)+'h</b>必要（今のペースだと約'+(t.daysAtPace-dL)+'日超過）');
+        }
+        if(pace.check){
+          const c=pace.check;
+          if(c.remain>0)lines.push('✅ チェック目標: 残り'+c.remain+'回 → 週'+r1(c.needPerWeek)+'回ペースが必要（直近7日は'+c.last7+'回）');
+        }
+        box.innerHTML=lines.join('<br>');
+        card.appendChild(box);
+      }
       if(prog.hasCheckHabs&&prog.hasTimeHabs){
         const mixNote=document.createElement('div');mixNote.style.cssText='font-size:10px;color:var(--tm);margin-top:4px';
         mixNote.textContent='※学習時間とチェック回数、それぞれの達成率の平均で進捗を算出しています';
@@ -3740,7 +4129,7 @@ function rData(){
   const hc=ST.habits.length,ck=ST.habits.reduce((s,h)=>s+Object.keys(h.checks).length,0);
 
   // ── バックアップ状態バナー ──
-  const daysSince=ST.lastBackup?Math.floor((NOW-new Date(ST.lastBackup))/86400000):null;
+  const daysSince=ST.lastBackup?Math.floor((NOW-parseYMD(ST.lastBackup))/86400000):null;
   let bnrCls='ok',bnrIcon='✅',bnrTitle='バックアップは最新です',bnrSub=ST.lastBackup?('最終: '+ST.lastBackup):'';
   if(daysSince===null){bnrCls='danger';bnrIcon='⚠️';bnrTitle='まだバックアップしたことがありません';bnrSub='データはこの端末のブラウザにのみ保存されています。エクスポートして保護しましょう。';}
   else if(daysSince>=14){bnrCls='danger';bnrIcon='⚠️';bnrTitle='バックアップが'+daysSince+'日前です';bnrSub='ブラウザのキャッシュを消すとデータが失われます。今すぐバックアップを推奨します。';}
@@ -3867,8 +4256,41 @@ function rData(){
       }catch(e){showBnr('ℹ️','手動で追加してください','上記の手順からホーム画面に追加できます。');}
     }]]:[]
   };
+  const cutoffCard={
+    t:'🌙 日付の区切り時刻',
+    d:'深夜に学習・作業した記録を「前日」として扱う締め時刻を設定できます。例えば「AM2時」を選ぶと、深夜0時〜1時59分の記録は前日分としてカウントされ、AM2時になった時点で日付が切り替わります。',
+    sub:'現在の設定: '+(CUTOFF_H===0?'午前0時（切り替えなし・標準）':'午前'+CUTOFF_H+'時まで前日扱い'),
+    btns:[0,1,2,3,4,5].map(h=>[
+      (h===CUTOFF_H?'✓ ':'')+(h===0?'0時（オフ）':h+'時まで'),
+      h===CUTOFF_H?'p':'',
+      ()=>{
+        if(h===CUTOFF_H)return;
+        try{localStorage.setItem('ht_cutoff',String(h));}catch(e){}
+        confirmDel(
+          (h===0?'区切りをオフ（午前0時）に戻します。':'区切り時刻を午前'+h+'時までに変更します。')+'\n変更を反映するためページを再読み込みします。よろしいですか？',
+          ()=>{try{save();}catch(e){}location.reload();},
+          ()=>{try{localStorage.setItem('ht_cutoff',String(CUTOFF_H));}catch(e){}}
+        );
+      }
+    ])
+  };
+  const bgNotifSupport=('serviceWorker' in navigator)&&('PeriodicSyncManager' in window);
+  const notifPerm=(typeof Notification!=='undefined')?Notification.permission:'unsupported';
+  const notifCard={
+    t:'🔔 バックグラウンド通知',
+    d:'アプリを閉じていても、リマインダー時刻を過ぎて未完了の習慣をまとめて通知します（Android Chromeでホーム画面にインストールした場合のみ）。省電力のため通知タイミングは端末が数時間おきに判断します。時刻ちょうどの通知は、アプリやタブを開いている間に行われます。\n現在の状態: 通知許可 '+(notifPerm==='granted'?'✅ 済':notifPerm==='denied'?'❌ 拒否中（ブラウザの設定から変更できます）':notifPerm==='unsupported'?'❌ 非対応':'⬜ 未設定')+' ／ バックグラウンド実行 '+(bgNotifSupport?'✅ 対応':'❌ この環境では非対応')+' ／ ホーム画面から起動 '+(isStandalone()?'✅':'⬜ 未（上のカード参照）'),
+    btns:(typeof Notification!=='undefined'&&Notification.permission==='default')?[['🔔 通知を許可する','p',()=>{
+      Notification.requestPermission().then(p=>{
+        showBnr(p==='granted'?'✅':'🔕',p==='granted'?'通知が有効になりました':'通知は許可されませんでした',p==='granted'?'習慣ごとのリマインダー時刻は各習慣の編集画面で設定できます。':'ブラウザの設定からいつでも変更できます。');
+        rData();
+        if(p==='granted'){try{save();}catch(e){}} // スナップショットを即時共有
+      });
+    }]]:[]
+  };
   const secs=[
     a2hsCard,
+    cutoffCard,
+    notifCard,
     {t:'📂 プロファイル管理',d:'現在「'+(PROFILES.find(p=>p.id===activeProfileId)||{}).name+'」を使用中です。用途別に習慣セットを切り替えられます。',btns:[['📂 プロファイルを切り替え/管理','p',()=>openProfileModal()]]},
     {t:'📥 JSONエクスポート（全データ）',d:'すべての習慣・記録・読書・メモ・目標をJSONファイルでエクスポートします。定期的なバックアップに利用してください。'+(photoCountForExport>0?' 写真'+photoCountForExport+'件が含まれるとファイルサイズが大きくなるため、メール添付等には軽量版が便利です。':''),sub:'習慣'+hc+'個 · チェックイン'+ck+'件 · 演習'+ST.exercises.length+'件 · 読書'+ST.books.length+'冊 · メモ'+ST.memos.length+'件',btns:photoCountForExport>0?[['📥 すべて含める','p',()=>doJsonExport(true)],['🪶 写真を除く（軽量版）','',()=>doJsonExport(false)]]:[['📥 JSONをダウンロード','p',()=>doJsonExport(true)]]},
     {t:'📊 CSVエクスポート',d:'習慣ごとの日別学習時間や達成状況をCSVでエクスポートします。',btns:[['📊 学習時間CSV','',()=>{const rows=[['習慣名','カテゴリ','日付','学習時間(分)']];ST.habits.forEach(h=>{const cat=getCat(h.cat);Object.entries(h.times||{}).sort().forEach(([d,m])=>rows.push([h.name,cat.label,d,m]));});dlCsv(rows,'学習時間_'+toS()+'.csv');}],['✔ チェックインCSV','',()=>{const rows=[['習慣名','カテゴリ','日付','完了']];ST.habits.forEach(h=>{const cat=getCat(h.cat);Object.entries(h.checks||{}).sort().forEach(([d,v])=>rows.push([h.name,cat.label,d,v]));});dlCsv(rows,'チェックイン_'+toS()+'.csv');}]]},
@@ -3944,8 +4366,11 @@ function rData(){
       confirmDel('現在のデータは上書きされます。念のため上書き前の状態を自動バックアップしてから取り込みます。よろしいですか？',()=>{
         // ロールバック用に現在の状態を自動保存
         try{localStorage.setItem('ht_v15_rollback__'+activeProfileId,JSON.stringify(ST));}catch(err){}
+        migrateDateShift(p); // 旧バージョンのエクスポートなら日付ズレを補正してから取り込む
         Object.assign(ST,p);
-        ['exercises','memos','books','goals'].forEach(k=>{if(!ST[k])ST[k]=[];});
+        ['exercises','memos','books','goals','countdowns'].forEach(k=>{if(!ST[k])ST[k]=[];});
+        if(!ST.nextCdId)ST.nextCdId=(ST.countdowns.reduce((m,c)=>Math.max(m,c.id||0),0)+1);
+        if(typeof ST.watch==='undefined')ST.watch=null;
         if(!ST.rem)ST.rem={habits:{}};
         if(!ST.unlockedBadges)ST.unlockedBadges={};
         Object.keys(ST.unlockedBadges).forEach(k=>{const v=ST.unlockedBadges[k];if(typeof v==='string'){ST.unlockedBadges[k]={count:1,firstDate:v,lastDate:v};}});
@@ -4046,7 +4471,7 @@ function rWeek(){
     let totalSlots=0,doneSlots=0,totalMin=0;
     const stats=habitsSnapshot.map(h=>{
       let done=0,slots=0,mins=0;
-      const created=h.createdAt?new Date(h.createdAt):null;
+      const created=h.createdAt?parseYMD(h.createdAt):null;
       wdays.forEach(d=>{
         if(d>NOW)return; // 未来日は除外
         if(created&&d<created)return; // 習慣作成前の期間は除外（脆弱性修正の核心）
@@ -4217,6 +4642,7 @@ bindEnterToSubmit(['g-title','g-hours','g-checkgoal'],'goal-save');
 bindEnterToSubmit(['b-title','b-author'],'book-save');
 bindEnterToSubmit(['m-tags'],'memo-save');
 bindEnterToSubmit(['pf-name'],'pf-create');
+bindEnterToSubmit(['cd-title','cd-emoji'],'cd-save');
 
 /* ══════════════════════════════════════
    初期表示
