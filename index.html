@@ -524,7 +524,7 @@ input[type="date"].fi::-webkit-calendar-picker-indicator,input[type="time"].fi::
   </button>
   <button class="bnav-item" data-grp="plan">
     <span class="bnav-icon">🎯</span>
-    <span class="bnav-label">計画</span>
+    <span class="bnav-label">目標・家族</span>
   </button>
   <button class="bnav-item" data-grp="settings">
     <span class="bnav-icon">⚙️</span>
@@ -807,6 +807,14 @@ input[type="date"].fi::-webkit-calendar-picker-indicator,input[type="time"].fi::
     </div>
     <div class="fg"><label class="fl">期限</label><input type="date" id="g-date" class="fi"></div>
     <div class="fg"><label class="fl">メモ</label><textarea id="g-note" class="fi" placeholder="戦略..."></textarea></div>
+    <div class="fg">
+      <label class="fl">👨‍👩‍👧 家族共有</label>
+      <label style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;background:var(--s1);border:1px solid var(--b);cursor:pointer">
+        <input type="checkbox" id="g-share" style="width:17px;height:17px;accent-color:var(--g)">
+        <span style="font-size:12px;color:var(--t)">この目標の進捗を家族に共有する</span>
+      </label>
+      <div style="font-size:11px;color:var(--tm);margin-top:3px">タイトル・期限・達成率が共有されます。メモは共有されません。</div>
+    </div>
     <div class="mrow"><button class="btn" id="goal-cancel">キャンセル</button><button class="btn p" id="goal-save" style="flex:1">保存する</button></div>
     <div id="goal-delrow" style="display:none;margin-top:9px"><button class="btn d" style="width:100%" id="goal-del">🗑 削除する</button></div>
   </div>
@@ -2116,7 +2124,7 @@ const GROUPS={
     ]
   },
   plan:{
-    label:'計画',
+    label:'目標・家族',
     tabs:[
       {id:'goals', label:'🎯 目標'},
       {id:'fam',   label:'👨‍👩‍👧 家族'},
@@ -2192,7 +2200,7 @@ function closeOv(id){const el=document.getElementById('ov-'+id);if(el)el.classLi
 const ONBOARD_KEY='ht_onboarded';
 const ONBOARD_STEPS=[
   {icon:'👋',title:'習慣トラッカーへようこそ',desc:'学習や運動などの習慣を記録し、続けるための機能が詰まったアプリです。簡単に使い方をご案内します（30秒で終わります）。'},
-  {icon:'🏠',title:'「今日」タブが基本',desc:'毎日ここでチェックを付けたり、学習時間を記録します。下のナビゲーションから「記録」「分析」「計画」「設定」にも移動できます。'},
+  {icon:'🏠',title:'「今日」タブが基本',desc:'毎日ここでチェックを付けたり、学習時間を記録します。下のナビゲーションから「記録」「分析」「目標・家族」「設定」にも移動できます。'},
   {icon:'📝',title:'サンプルデータについて',desc:'今表示されている「数学」「物理」などの習慣はサンプルです。実際に使う際は、ご自身の習慣に書き換えるか、新しく追加してください。'},
   {icon:'🧊',title:'フリーズ券で無理なく継続',desc:'できなかった日があっても、フリーズ券を使えば連続記録が途切れません。完璧を目指さなくて大丈夫です。'},
   {icon:'🎯',title:'さあ、始めましょう',desc:'右上の「＋追加」からあなた自身の習慣を登録できます。まずはサンプルを眺めて、操作に慣れてみてください。'},
@@ -3010,17 +3018,37 @@ function famBuildSummary(){
   shared.forEach(h=>{for(let i=0;i<7;i++)weekMin+=(h.times||{})[dB(i)]||0;});
   return {
     v:1, mid:c.mid, name:c.name, updated:Date.now(), dayKey:td,
-    habits:shared.map(h=>({
-      name:h.name, emoji:h.emoji, mode:h.trackMode||'time',
-      checked:!!h.checks[td],
-      todayMin:(h.times||{})[td]||0,
-      goalMin:h.goalMin||0,
-      streak:streak(h)
-    })),
+    habits:shared.map(h=>{
+      // 直近185日(約6ヶ月)の履歴: 時間(分)と達成日を圧縮して同梱
+      const hist={},histC=[];
+      for(let i=0;i<185;i++){
+        const k=dB(i);
+        const m=(h.times||{})[k]||0;
+        if(m>0)hist[k]=m;
+        if(h.checks[k])histC.push(k);
+      }
+      return {
+        name:h.name, emoji:h.emoji, mode:h.trackMode||'time',
+        checked:!!h.checks[td],
+        todayMin:(h.times||{})[td]||0,
+        goalMin:h.goalMin||0,
+        streak:streak(h),
+        hist, histC
+      };
+    }),
     todayDone:shared.filter(h=>h.checks[td]).length,
     todayTotal:shared.length,
     todayMin:shared.reduce((s,h)=>s+((h.times||{})[td]||0),0),
-    weekMin
+    weekMin,
+    goals:(ST.goals||[]).filter(g=>g.share).map(g=>{
+      const prog=calcGoalProgress(g,ST.habits);
+      return {
+        title:g.title, date:g.date||'',
+        hours:g.hours||0, checkGoal:g.checkGoal||0,
+        pct:prog.pp||0,
+        accHours:Math.round((prog.timeAccHours||0)*10)/10
+      };
+    })
   };
 }
 
@@ -3043,14 +3071,46 @@ async function famPull(){
   if(!res.ok)throw new Error('pull '+res.status);
   const g=await res.json();
   const members=[];
+  let reactions=[];
   Object.keys(g.files||{}).forEach(fn=>{
+    if(fn==='reactions.json'){
+      try{const r=JSON.parse(g.files[fn].content);if(Array.isArray(r))reactions=r;}catch(e){}
+      return;
+    }
     if(!/^member_.*\.json$/.test(fn))return;
     try{const d=JSON.parse(g.files[fn].content);if(d&&d.name)members.push(d);}catch(e){}
   });
   members.sort((a,b)=>(a.mid===c.mid?-1:b.mid===c.mid?1:(b.updated||0)-(a.updated||0)));
-  try{localStorage.setItem(FAM_CACHE,JSON.stringify({at:Date.now(),members}));}catch(e){}
-  return members;
+  const data={at:Date.now(),members,reactions};
+  try{localStorage.setItem(FAM_CACHE,JSON.stringify(data));}catch(e){}
+  return data;
 }
+// リアクション送信: 最新を読み→追記→書き戻し（14日/最大100件に自動整理）
+async function famSendReaction(toMid,emoji,msg){
+  const c=famCfg();if(!c)throw new Error('no cfg');
+  const res=await fetch(FAM_API+'/gists/'+c.gist,{headers:famHeaders(c.token)});
+  if(!res.ok)throw new Error('pull '+res.status);
+  const g=await res.json();
+  let list=[];
+  try{if(g.files&&g.files['reactions.json'])list=JSON.parse(g.files['reactions.json'].content)||[];}catch(e){}
+  if(!Array.isArray(list))list=[];
+  list.push({
+    id:'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+    from:c.mid,fromName:c.name,to:toMid,
+    emoji:String(emoji||'👏').slice(0,4),
+    msg:String(msg||'').slice(0,60),
+    at:Date.now()
+  });
+  const cutoff=Date.now()-14*86400000;
+  list=list.filter(r=>(r.at||0)>cutoff).slice(-100);
+  const body={files:{'reactions.json':{content:JSON.stringify(list)}}};
+  const res2=await fetch(FAM_API+'/gists/'+c.gist,{method:'PATCH',headers:famHeaders(c.token),body:JSON.stringify(body)});
+  if(!res2.ok)throw new Error('push '+res2.status);
+  return list;
+}
+const FAM_RSEEN='ht_fam_rseen';
+function famSeenTs(){return parseInt(localStorage.getItem(FAM_RSEEN))||0;}
+function famMarkSeen(){try{localStorage.setItem(FAM_RSEEN,String(Date.now()));}catch(e){}}
 async function famCreateGist(token){
   const res=await fetch(FAM_API+'/gists',{method:'POST',headers:famHeaders(token),body:JSON.stringify({
     description:'習慣トラッカー 家族共有データ',public:false,
@@ -3076,6 +3136,7 @@ function famErrMsg(e){
 
 function rFam(){
   const root=document.getElementById('pg-fam');root.innerHTML='';
+  famDetY=null;famDetM=null; // 一覧に戻ったら月選択をリセット
   if(!famConfigured()){rFamSetup(root);return;}
   const c=famCfg();
 
@@ -3090,8 +3151,9 @@ function rFam(){
   const sb=document.createElement('button');sb.className='btn sm';sb.textContent='⚙';sb.title='共有設定';sb.addEventListener('click',()=>rFamSetup(root,true));tr.appendChild(sb);
   top.appendChild(tr);
   const sharedN=ST.habits.filter(h=>h.share).length;
+  const sharedG=(ST.goals||[]).filter(g=>g.share).length;
   const hint=document.createElement('div');hint.style.cssText='font-size:11px;color:var(--tm);margin-top:7px';
-  hint.textContent='あなた（'+c.name+'）の共有中の習慣: '+sharedN+'件'+(sharedN===0?' — 各習慣の編集画面の「詳細設定 → 家族共有」で選べます':'');
+  hint.textContent='あなた（'+c.name+'）の共有中: 習慣'+sharedN+'件・目標'+sharedG+'件'+((sharedN+sharedG)===0?' — 習慣・目標それぞれの編集画面で共有をオンにできます':'');
   top.appendChild(hint);
   root.appendChild(top);
 
@@ -3100,23 +3162,41 @@ function rFam(){
   // キャッシュがあれば即表示してから最新化
   try{
     const cache=JSON.parse(localStorage.getItem(FAM_CACHE));
-    if(cache&&cache.members)renderFamMembers(list,cache.members,c);
+    if(cache&&cache.members)renderFamMembers(list,cache.members,c,cache.reactions||[]);
   }catch(e){}
 
   (async()=>{
     try{
       await famPush(); // 自分の最新を先に反映
-      const members=await famPull();
+      const data=await famPull();
       const st=document.getElementById('fam-sync-status');
       if(st)st.textContent='最終同期: たった今';
-      if(members)renderFamMembers(list,members,c);
+      if(data)renderFamMembers(list,data.members,c,data.reactions||[]);
     }catch(e){
       const st=document.getElementById('fam-sync-status');
       if(st)st.textContent='⚠️ '+famErrMsg(e);
     }
   })();
 }
-function renderFamMembers(list,members,c){
+// リアクション送信の共通処理（ボタンを一時無効化し、結果をバナー表示）
+async function famDoSend(btn,member,emoji,msg){
+  const orig=btn.textContent;
+  btn.disabled=true;btn.textContent='…';
+  try{
+    await famSendReaction(member.mid,emoji,msg);
+    btn.textContent='✓';
+    showBnr(emoji,member.name+'さんに送りました',msg?'「'+msg+'」':'');
+    setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},1200);
+    return true;
+  }catch(e){
+    btn.textContent=orig;btn.disabled=false;
+    showBnr('⚠️','送信できませんでした',famErrMsg(e));
+    return false;
+  }
+}
+function renderFamMembers(list,members,c,reactions){
+  reactions=reactions||[];
+  const seenTs=famSeenTs();
   list.innerHTML='';
   if(!members.length){
     const em=document.createElement('div');em.className='card';em.style.cssText='text-align:center;color:var(--tm);font-size:12px;padding:20px';
@@ -3151,11 +3231,238 @@ function renderFamMembers(list,members,c){
       row.appendChild(ck);
       card.appendChild(row);
     });
+    // 共有された目標
+    (m.goals||[]).forEach(g=>{
+      const row=document.createElement('div');row.style.cssText='padding:6px 0;border-top:1px solid var(--b)';
+      const r1=document.createElement('div');r1.style.cssText='display:flex;align-items:baseline;gap:6px;font-size:12px;margin-bottom:4px';
+      const nm3=document.createElement('span');nm3.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600';
+      nm3.textContent='🎯 '+g.title;r1.appendChild(nm3);
+      const pc=document.createElement('span');pc.style.cssText='font-size:12px;font-weight:800;color:'+(g.pct>=100?'#16a34a':'var(--t2)');
+      pc.textContent=(g.pct>=100?'🎉 ':'')+g.pct+'%';r1.appendChild(pc);
+      row.appendChild(r1);
+      const pb=document.createElement('div');pb.className='pbar';pb.style.height='5px';
+      const pf=document.createElement('div');pf.style.cssText='height:100%;border-radius:3px;background:'+(g.pct>=100?'#16a34a':'#4ade80')+';width:'+Math.min(100,g.pct)+'%';
+      pb.appendChild(pf);row.appendChild(pb);
+      const meta=[];
+      if(g.hours>0)meta.push(g.accHours+'h / '+g.hours+'h');
+      if(g.date){
+        const dL2=Math.round((parseYMD(g.date)-NOW)/86400000);
+        meta.push(dL2>0?'残り'+dL2+'日':dL2===0?'今日が期限！':'期限超過');
+      }
+      if(meta.length){
+        const mt=document.createElement('div');mt.style.cssText='font-size:10px;color:var(--tm);margin-top:3px';
+        mt.textContent=meta.join(' ・ ');row.appendChild(mt);
+      }
+      card.appendChild(row);
+    });
+    // ── リアクション ──
+    const rxTo=reactions.filter(r=>r.to===m.mid).sort((a,b)=>(b.at||0)-(a.at||0));
+    if(isMe){
+      // 自分宛て: 届いたリアクション一覧（直近5件）
+      if(rxTo.length){
+        const rxBox=document.createElement('div');rxBox.style.cssText='margin-top:7px;padding:8px 10px;border-radius:9px;background:var(--gbg);border:1px solid var(--gl)';
+        const rt=document.createElement('div');rt.style.cssText='font-size:11px;font-weight:700;margin-bottom:4px';rt.textContent='💬 届いたリアクション';rxBox.appendChild(rt);
+        rxTo.slice(0,5).forEach(r=>{
+          const line=document.createElement('div');
+          const isNew=(r.at||0)>seenTs;
+          line.style.cssText='font-size:11px;color:var(--t2);padding:2px 0'+(isNew?';font-weight:700;color:var(--t)':'');
+          line.textContent=(isNew?'🆕 ':'')+r.emoji+' '+(r.fromName||'家族')+(r.msg?'「'+r.msg+'」':'')+' ・ '+famAgo(r.at);
+          rxBox.appendChild(line);
+        });
+        card.appendChild(rxBox);
+      }
+    }else{
+      // 他のメンバー宛て: 最近のリアクション(2件)＋送信ボタン
+      if(rxTo.length){
+        const rl=document.createElement('div');rl.style.cssText='font-size:10px;color:var(--tm);margin-top:6px';
+        rl.textContent=rxTo.slice(0,2).map(r=>r.emoji+' '+(r.fromName||'家族')).join(' ／ ');
+        card.appendChild(rl);
+      }
+      const rxRow=document.createElement('div');rxRow.style.cssText='display:flex;gap:6px;margin-top:8px;align-items:center';
+      ['👏','🔥','💪','🎉'].forEach(em=>{
+        const b=document.createElement('button');
+        b.style.cssText='flex:1;padding:7px 0;border-radius:9px;border:1px solid var(--b);background:var(--s1);font-size:15px;cursor:pointer';
+        b.textContent=em;
+        b.addEventListener('click',ev=>{ev.stopPropagation();famDoSend(b,m,em,'');});
+        rxRow.appendChild(b);
+      });
+      const wb=document.createElement('button');
+      wb.style.cssText='flex-shrink:0;padding:7px 10px;border-radius:9px;border:1px solid var(--b);background:var(--s1);font-size:13px;cursor:pointer;font-family:inherit';
+      wb.textContent='✍';wb.title='メッセージを添えて送る';
+      rxRow.appendChild(wb);
+      card.appendChild(rxRow);
+      // メッセージ入力（✍で開閉）
+      const msgRow=document.createElement('div');msgRow.style.cssText='display:none;gap:6px;margin-top:6px';
+      const mi=document.createElement('input');mi.type='text';mi.className='fi';mi.maxLength=60;mi.placeholder='ひとこと（例: 今日もえらい！）';mi.style.cssText='flex:1;font-size:12px';
+      mi.addEventListener('click',ev=>ev.stopPropagation());
+      const ms=document.createElement('button');ms.className='btn p sm';ms.textContent='送信';
+      ms.addEventListener('click',ev=>{ev.stopPropagation();const txt=mi.value.trim();if(!txt)return;famDoSend(ms,m,'💬',txt).then(ok=>{if(ok)mi.value='';});});
+      msgRow.appendChild(mi);msgRow.appendChild(ms);
+      card.appendChild(msgRow);
+      wb.addEventListener('click',ev=>{
+        ev.stopPropagation();
+        const open=msgRow.style.display==='flex';
+        msgRow.style.display=open?'none':'flex';
+        if(!open)setTimeout(()=>mi.focus(),50);
+      });
+    }
+    const more=document.createElement('div');more.style.cssText='font-size:11px;color:var(--g);text-align:right;margin-top:6px;font-weight:600';
+    more.textContent='📅 月次の履歴を見る ▸';
+    card.appendChild(more);
+    card.style.cursor='pointer';
+    card.addEventListener('click',()=>famDetail(m));
     list.appendChild(card);
   });
   const note=document.createElement('div');note.style.cssText='font-size:10px;color:var(--tm);text-align:center;margin-top:4px;line-height:1.7';
-  note.textContent='更新はアプリを開いたときと記録の約8秒後に自動同期されます。「🔄 更新」で手動同期もできます。';
+  note.textContent='更新はアプリを開いたときと記録の約8秒後に自動同期されます。「🔄 更新」で手動同期もできます。リアクションは全員が見られます。';
   list.appendChild(note);
+  famMarkSeen();
+}
+
+// ── メンバーの月次詳細（習慣の履歴） ──
+let famDetY=null,famDetM=null;
+function famDetail(member){
+  const root=document.getElementById('pg-fam');root.innerHTML='';
+  if(famDetY===null){famDetY=NOW.getFullYear();famDetM=NOW.getMonth();}
+  const y=famDetY,mo=famDetM;
+
+  // 戻るヘッダー
+  const top=document.createElement('div');top.className='card';
+  const tr=document.createElement('div');tr.style.cssText='display:flex;align-items:center;gap:8px';
+  const back=document.createElement('button');back.className='btn sm';back.textContent='← 家族一覧';
+  back.addEventListener('click',()=>{famDetY=null;famDetM=null;rFam();});
+  tr.appendChild(back);
+  const nm=document.createElement('div');nm.style.cssText='font-size:14px;font-weight:800;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  nm.textContent=member.name+' の記録';
+  tr.appendChild(nm);top.appendChild(tr);root.appendChild(top);
+
+  const hasHist=(member.habits||[]).some(h=>h.hist||h.histC);
+  if(!hasHist){
+    const em=document.createElement('div');em.className='card';em.style.cssText='text-align:center;color:var(--tm);font-size:12px;padding:20px;line-height:1.8';
+    em.textContent='このメンバーの履歴データはまだありません。相手のアプリが最新版に更新されて記録が同期されると、ここに月次の履歴が表示されます。';
+    root.appendChild(em);return;
+  }
+
+  // 月ナビゲーション
+  root.appendChild(mkMnav(y+'年'+(mo+1)+'月',
+    ()=>{famDetM--;if(famDetM<0){famDetM=11;famDetY--;}famDetail(member);},
+    ()=>{famDetM++;if(famDetM>11){famDetM=0;famDetY++;}famDetail(member);}));
+
+  // その月の日別集計
+  const dim=new Date(y,mo+1,0).getDate();
+  const dayMin=[],dayCk=[];
+  let mTot=0,mCkTot=0,recDays=0;
+  for(let d=1;d<=dim;d++){
+    const ds=dS(new Date(y,mo,d));
+    let mm=0,cc=0;
+    (member.habits||[]).forEach(h=>{
+      mm+=(h.hist||{})[ds]||0;
+      if((h.histC||[]).includes(ds))cc++;
+    });
+    dayMin.push(mm);dayCk.push(cc);
+    mTot+=mm;mCkTot+=cc;
+    if(mm>0||cc>0)recDays++;
+  }
+
+  // サマリー
+  const sg=document.createElement('div');sg.className='sg g3';sg.style.marginBottom='12px';
+  [['月間合計時間',fmtS(mTot),true],['達成回数',mCkTot+'回',false],['記録した日',recDays+'日',false]]
+    .forEach(([l,v,g])=>sg.appendChild(mkSC(l,v,g)));
+  root.appendChild(sg);
+
+  // 月間カレンダー（色の濃さ=その日の合計時間）
+  const cal=document.createElement('div');cal.className='card';
+  const ct=document.createElement('div');ct.style.cssText='font-size:13px;font-weight:700;margin-bottom:8px';ct.textContent='📅 日別の記録';cal.appendChild(ct);
+  const wk=document.createElement('div');wk.style.cssText='display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:9px;color:var(--tm);text-align:center;margin-bottom:3px';
+  ['日','月','火','水','木','金','土'].forEach(w=>{const s=document.createElement('span');s.textContent=w;wk.appendChild(s);});
+  cal.appendChild(wk);
+  const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(7,1fr);gap:3px';
+  const lead=new Date(y,mo,1).getDay();
+  for(let i=0;i<lead;i++)grid.appendChild(document.createElement('div'));
+  const info=document.createElement('div');info.style.cssText='font-size:11px;color:var(--t2);margin-top:8px;min-height:16px';
+  info.textContent='日付をタップすると詳細が表示されます';
+  let selEl=null;
+  for(let d=1;d<=dim;d++){
+    const mm=dayMin[d-1],cc=dayCk[d-1];
+    const lv=mm>=120?4:mm>=60?3:mm>=30?2:(mm>0||cc>0)?1:0;
+    const cell=document.createElement('div');
+    cell.style.cssText='aspect-ratio:1;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;cursor:pointer;border:1px solid var(--b);'+
+      (lv===0?'background:var(--s1);color:var(--tm)':
+       'background:'+['','#bbf7d0','#4ade80','#16a34a','#166534'][lv]+';color:'+(lv>=3?'#fff':'#14532d')+';border-color:transparent;font-weight:600');
+    const dt=new Date(y,mo,d);
+    if(dt>NOW)cell.style.opacity='.35';
+    cell.textContent=d;
+    const ds=dS(dt);
+    cell.addEventListener('click',()=>{
+      if(selEl)selEl.style.outline='';
+      selEl=cell;cell.style.outline='2px solid var(--t)';
+      const parts=[];
+      (member.habits||[]).forEach(h=>{
+        const m2=(h.hist||{})[ds]||0;
+        const ck2=(h.histC||[]).includes(ds);
+        if(m2>0||ck2)parts.push((h.emoji||'')+h.name+(m2>0?' '+fmtM(m2):' ✓'));
+      });
+      info.textContent=(mo+1)+'月'+d+'日 — '+(parts.length?parts.join(' ／ '):'記録なし');
+    });
+    grid.appendChild(cell);
+  }
+  cal.appendChild(grid);cal.appendChild(info);root.appendChild(cal);
+
+  // 習慣ごとの月間内訳
+  const hc=document.createElement('div');hc.className='card';
+  const ht=document.createElement('div');ht.style.cssText='font-size:13px;font-weight:700;margin-bottom:7px';ht.textContent='📚 習慣ごとの内訳';hc.appendChild(ht);
+  const maxHab=Math.max(1,...(member.habits||[]).map(h=>{
+    let s=0;for(let d=1;d<=dim;d++)s+=(h.hist||{})[dS(new Date(y,mo,d))]||0;return s;
+  }));
+  (member.habits||[]).forEach(h=>{
+    let hMin=0,hDays=0;
+    for(let d=1;d<=dim;d++){
+      const ds=dS(new Date(y,mo,d));
+      hMin+=(h.hist||{})[ds]||0;
+      if((h.histC||[]).includes(ds))hDays++;
+    }
+    const row=document.createElement('div');row.style.cssText='padding:7px 0;border-top:1px solid var(--b)';
+    const r1=document.createElement('div');r1.style.cssText='display:flex;align-items:center;gap:7px;font-size:12px;margin-bottom:4px';
+    const nm2=document.createElement('span');nm2.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600';
+    nm2.textContent=(h.emoji||'')+' '+h.name;r1.appendChild(nm2);
+    const st=document.createElement('span');st.style.cssText='font-size:11px;color:var(--t2);white-space:nowrap';
+    st.textContent=(hMin>0?fmtS(hMin)+' ・ ':'')+hDays+'日達成';r1.appendChild(st);
+    row.appendChild(r1);
+    const pb=document.createElement('div');pb.className='pbar';pb.style.height='5px';
+    const pf=document.createElement('div');pf.style.cssText='height:100%;border-radius:3px;background:#4ade80;width:'+Math.round(hMin/maxHab*100)+'%';
+    pb.appendChild(pf);row.appendChild(pb);
+    hc.appendChild(row);
+  });
+  root.appendChild(hc);
+
+  // 共有された目標
+  if((member.goals||[]).length){
+    const gc=document.createElement('div');gc.className='card';
+    const gt=document.createElement('div');gt.style.cssText='font-size:13px;font-weight:700;margin-bottom:7px';gt.textContent='🎯 共有中の目標';gc.appendChild(gt);
+    member.goals.forEach(g=>{
+      const row=document.createElement('div');row.style.cssText='padding:7px 0;border-top:1px solid var(--b)';
+      const r1=document.createElement('div');r1.style.cssText='display:flex;align-items:baseline;gap:6px;font-size:12px;margin-bottom:4px';
+      const nm3=document.createElement('span');nm3.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600';
+      nm3.textContent=g.title;r1.appendChild(nm3);
+      const pc=document.createElement('span');pc.style.cssText='font-weight:800;color:'+(g.pct>=100?'#16a34a':'var(--t2)');
+      pc.textContent=(g.pct>=100?'🎉 ':'')+g.pct+'%';r1.appendChild(pc);
+      row.appendChild(r1);
+      const pb=document.createElement('div');pb.className='pbar';pb.style.height='5px';
+      const pf=document.createElement('div');pf.style.cssText='height:100%;border-radius:3px;background:'+(g.pct>=100?'#16a34a':'#4ade80')+';width:'+Math.min(100,g.pct)+'%';
+      pb.appendChild(pf);row.appendChild(pb);
+      const meta=[];
+      if(g.hours>0)meta.push(g.accHours+'h / '+g.hours+'h');
+      if(g.checkGoal>0)meta.push('目標'+g.checkGoal+'回');
+      if(g.date)meta.push('期限 '+g.date.replace(/-/g,'/'));
+      if(meta.length){const mt=document.createElement('div');mt.style.cssText='font-size:10px;color:var(--tm);margin-top:3px';mt.textContent=meta.join(' ・ ');row.appendChild(mt);}
+      gc.appendChild(row);
+    });
+    root.appendChild(gc);
+  }
+
+  const note=document.createElement('div');note.style.cssText='font-size:10px;color:var(--tm);text-align:center;margin-top:4px;line-height:1.7';
+  note.textContent='履歴は各メンバーの端末から直近約6ヶ月分が共有されます。それ以前の月は表示できません。';
+  root.appendChild(note);
 }
 
 // 設定画面（初期設定/変更共用）
@@ -4118,6 +4425,7 @@ function openGoalModal(id){
   document.getElementById('g-title').value=g?g.title:'';document.getElementById('g-hours').value=g&&g.hours?g.hours:'';
   document.getElementById('g-checkgoal').value=g&&g.checkGoal?g.checkGoal:'';
   document.getElementById('g-date').value=g?g.date:'';document.getElementById('g-note').value=g?g.note||'':'';
+  document.getElementById('g-share').checked=!!(g&&g.share);
   const selIds=g?g.habitIds||[]:[];
   const list=document.getElementById('g-hlist');list.innerHTML='';
   ST.habits.forEach(h=>{
@@ -4149,7 +4457,7 @@ document.getElementById('goal-cancel').addEventListener('click',()=>closeOv('goa
 document.getElementById('goal-save').addEventListener('click',()=>{
   const title=document.getElementById('g-title').value.trim();if(!title)return;
   const habitIds=[...document.querySelectorAll('#g-hlist input:checked')].map(c=>parseInt(c.value));
-  const data={title,habitIds,hours:parseInt(document.getElementById('g-hours').value)||0,checkGoal:parseInt(document.getElementById('g-checkgoal').value)||0,date:document.getElementById('g-date').value,note:document.getElementById('g-note').value.trim()};
+  const data={title,habitIds,hours:parseInt(document.getElementById('g-hours').value)||0,checkGoal:parseInt(document.getElementById('g-checkgoal').value)||0,date:document.getElementById('g-date').value,note:document.getElementById('g-note').value.trim(),share:document.getElementById('g-share').checked};
   if(editGID){const g=ST.goals.find(x=>x.id===editGID);if(g)Object.assign(g,data);}
   else ST.goals.push({id:ST.nextGId++,...data,createdAt:toS()});
   save();closeOv('goal');rGoals();
